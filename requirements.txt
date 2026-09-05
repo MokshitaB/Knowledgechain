@@ -1,0 +1,5 @@
+docx2txt
+requests
+qdrant-client
+fastapi
+uvicorn

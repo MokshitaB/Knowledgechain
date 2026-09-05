@@ -1,0 +1,256 @@
+{
+  "name": "Knowledge Base Query gmail",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/embed",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"nomic-embed-text\",\n  \"input\": \"={{$json.body.question}}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        416,
+        0
+      ],
+      "id": "767ebc68-9585-4335-af22-370278eb8d36",
+      "name": "Generate Embedding"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:6333/collections/knowledge_base/points/query",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{$json.embeddings[0]}}"
+            },
+            {
+              "name": "limit",
+              "value": "={{ 5 }}"
+            },
+            {
+              "name": "with_payload",
+              "value": "={{ true }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        624,
+        0
+      ],
+      "id": "fc4e09d4-bf87-4c1e-9edb-966b9f121fff",
+      "name": "Search Knowledge Base"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the user's original question\nconst question = $('Webhook').first().json.body.question;\n\n// Get all retrieved chunks\nconst points = $json.result.points;\n\n// Combine all retrieved chunks into one context\nconst context = points\n  .map(point => point.payload.chunk)\n  .join(\"\\n\\n----------------------\\n\\n\");\n\n// Also keep track of the source documents\nconst sources = [\n  ...new Set(points.map(point => point.payload.source))\n];\n\n// Create the prompt for qwen3\nconst prompt = `\nYou are an AI assistant answering questions from the company's knowledge base.\n\nRules:\n1. Answer ONLY from the provided context.\n2. Do NOT make up information.\n3. If the answer is not available in the context, reply:\n\"I couldn't find that information in the knowledge base.\"\n\nContext:\n${context}\n\nQuestion:\n${question}\n\nAnswer:\n`;\n\nreturn [\n  {\n    json: {\n      prompt,\n      sources\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        0
+      ],
+      "id": "a794f59c-8df5-459b-9bd0-e7cd6c58c8ae",
+      "name": "Build Context"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "qwen3:8b"
+            },
+            {
+              "name": "stream",
+              "value": "={{ false }}"
+            },
+            {
+              "name": "messages",
+              "value": "={{ [ { role: \"user\", content: $json.prompt } ] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "a13198ef-6f08-4b87-ac98-8e3e52e9aeb1",
+      "name": "Generate AI Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the AI answer from the previous node\nconst answer = $json.message.content;\n\n// Get the sources from the Build Prompt node\nconst sources = $('Build Context').first().json.sources;\n\nreturn [\n  {\n    json: {\n      answer,\n      sources\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        0
+      ],
+      "id": "86dfdee6-e8f3-4361-9b04-0d830147445e",
+      "name": "Foematted Response"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "44037686-a2d7-4bfa-a15f-ee6f1665bb8d",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        32,
+        0
+      ],
+      "id": "69f036b4-222d-41a9-a9cf-02f5721214a8",
+      "name": "Webhook",
+      "webhookId": "44037686-a2d7-4bfa-a15f-ee6f1665bb8d"
+    },
+    {
+      "parameters": {
+        "sendTo": "jyothsna.saraf@magnaquest.com",
+        "subject": "Knowledge Base",
+        "message": "={{ '<h2>Knowledge Base Response</h2><p>' + $json.answer + '</p><br><p><strong>Source:</strong> ' + $json.sources.join(', ') + '</p>' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        -208
+      ],
+      "id": "1c0a7454-7755-4926-8eec-4071f5dcc8cd",
+      "name": "Send a message",
+      "webhookId": "b5acc6c6-d3a9-42c8-a358-ccd3c0f15450",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YB5BzGCFoG9uqaJD",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ answer: $json.answer, sources: $json.sources }) }}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1552,
+        0
+      ],
+      "id": "7691567a-bfa8-4224-8ecc-3ba86d0b501e",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Generate Embedding": {
+      "main": [
+        [
+          {
+            "node": "Search Knowledge Base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Knowledge Base": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context": {
+      "main": [
+        [
+          {
+            "node": "Generate AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Response": {
+      "main": [
+        [
+          {
+            "node": "Foematted Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Generate Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Foematted Response": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "dcb59cc3-77f4-49cb-9b71-4cebad906dd8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b2a8b98f4e78ed7e1f3e6b047265058ee169639b5e1299617edc72b13480e733"
+  },
+  "nodeGroups": [],
+  "id": "M5LJBIsE12Y13iYR",
+  "tags": []
+}
